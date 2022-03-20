@@ -1,2 +1,2 @@
-from .TelegramClient import TelegramClient 
+from .telegramClient import TelegramClient 
 from .createConnection import createConnection 
