@@ -9,5 +9,5 @@ setup(
       url="https://github.com/Arjun-M/pyTelegramClient",
       packages = ['pyTelegramClient'] ,
       license='MIT',      
-      install_requires=['requests'],
+      install_requires=['requests','urllib3'],
 )
