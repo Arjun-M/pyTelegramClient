@@ -1,17 +1,21 @@
-import requests , json , logging , re
+import json , logging , re , requests
+from requests.sessions import Session
+from .event import messageEvent , callbackQueryEvent
+from threading import Thread,local
 
-
+thread_local = local()
 logging.basicConfig(format='%(asctime)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S')  
 
 class TelegramClient:
     def __init__(self, token ):
         self.token = token
+        self.answers = {}
         self.message_handlers = []               # { callback: <func> , regexp:None , text:[] , commands:[] , type:[ "text" ] }
-        self.edited_message_handlers = []        # 
-        self.channel_post_handlers = []          #
-        self.edited_channel_post_handlers = []   #
+        self.edited_message_handlers = []        # { callback: <func> , regexp:None , text:[] , type:[ "text" ] }
+        self.channel_post_handlers = []          # { callback: <func> }
+        self.edited_channel_post_handlers = []   # { callback: <func> }
         self.inline_handlers = []                # { callback: <func> , regexp:None , query:[] }
-        self.chosen_inline_handlers = []         #
+        self.chosen_inline_handlers = []         ## { callback: <func> }
         self.callback_query_handlers = []        # { callback: <func> , regexp:None , data:[] }
         self.shipping_query_handlers = []
         self.pre_checkout_query_handlers = []
@@ -20,29 +24,50 @@ class TelegramClient:
         self.my_chat_member_handlers = []
         self.chat_member_handlers = []
         self.chat_join_request_handlers = []    
+        
+    def new_session(self):
+        if not hasattr(thread_local,'session'):
+            thread_local.session = requests.Session()
+        return thread_local.session
     
-    
-    def _polling(self , offset):
-        req = self.callApi("getUpdates" , {"offset":offset} )
+    def _polling(self , offset , allowed_updates):
+        req = self.callApi("getUpdates" , {"offset":offset , "allowed_updates": allowed_updates , "limit":100} )
         if req["ok"] == False:
             self.polling = False            
-            logging.warning("pyTelegramClient : check bot token and try again .")
-            return None
+            logging.warning("pyTelegramClient : failed to 'getUpdates' seems this is not a valid token .")
+            return False
         else:
             return req
         
-    def start_polling(self):
+    def polling(self , allowed_updates=None):
         self.polling = True
         offset = 0
         logging.warning("worker : pyTelegramClient has started polling .")
+        self.callApi("deleteWebhook", {}) # delete webhook before start polling .
         while self.polling :
-            updates = self._polling(offset+1)
+            updates = self._polling(offset+1 , allowed_updates)
+            if updates is False:
+                break;
             if updates is not None:
                 for x in updates["result"]:
                     offset = x["update_id"] 
                     self.processUpdate (x)
     
-    
+    def short_polling(self , timeout=300 , allowed_updates=None):
+        self.polling = True
+        offset = 0
+        logging.warning("worker : pyTelegramClient has started small polling .")
+        self.callApi("deleteWebhook", {})
+        for _ in range(timeout) :
+            updates = self._polling(offset+1 , allowed_updates)
+            if updates is False:
+                break;
+            if updates is not None:
+                for x in updates["result"]:
+                    offset = x["update_id"] 
+                    self.processUpdate (x)
+        logging.warning("pyTelegramClient : short polling finished .")
+        
     """
     ====×  REQUEST HANDLER { 1 }  ×====
     """
@@ -68,7 +93,31 @@ class TelegramClient:
                     return logging.warning("pyTelegramClient : 'types' list must an array . ") 
                 _dict["types"] = kwargs["types"]            
             self.message_handlers.append(_dict)
-            logging.warning("pyTelegramClient : registered new message handler . ")          
+        return inner
+    
+    def callbackQueryHandler(self , *args, **kwargs):
+        def inner(func):
+            _dict = {"callback": func , "regexp": None , "data":[] }
+            if "regexp"in kwargs:
+                _dict["regexp"] = kwargs["regexp"]
+            if "data" in kwargs :
+                if isinstance( kwargs["data"] , list) == False:
+                    return logging.warning("pyTelegramClient : 'query' list must an array . ") 
+                _dict["data"] = kwargs["data"]
+            self.callback_query_handlers.append(_dict)
+            logging.warning("pyTelegramClient : registered new callback_query handler . ")
+        return inner
+    
+    def channelPostHandler(self , *args, **kwargs):
+        def inner(func):
+            _dict = {"callback": func }
+            self.channel_post_handlers.append( _dict )
+        return inner
+    
+    def editChannelPostHandler(self , *args, **kwargs):
+        def inner(func):
+            _dict = {"callback": func }
+            self.edited_channel_post_handlers.append( _dict )
         return inner
     
     def inlineHandler(self , *args, **kwargs):
@@ -81,14 +130,29 @@ class TelegramClient:
                     return logging.warning("pyTelegramClient : 'query' list must an array . ") 
                 _dict["query"] = kwargs["query"]
             self.inline_handlers.append(_dict)
-            logging.warning("pyTelegramClient : registered new message handler . ")
+        return inner
+    
+    def editMessageHandler(self , *args, **kwargs):
+        def inner(func):
+            _dict = {"callback": func , "commands":[] , "types":[] , "regexp": None , "text":[] }
+            if "types" in kwargs :
+                if isinstance( kwargs["types"] , list) == False:
+                    return logging.warning("pyTelegramClient : 'types' list must an array . ") 
+                _dict["types"] = kwargs["types"]
+            if "regexp" in kwargs:
+                _dict["regexp"] = kwargs["regexp"] 
+            if "text" in kwargs:
+                if isinstance( kwargs["text"] , list) == False:
+                    return logging.warning("pyTelegramClient : 'text' list must an array . ") 
+                _dict["text"] = kwargs["text"]
+            self.edited_message_handlers.append(_dict)
         return inner
     
     """
     ====×  REQUEST HANDLER { 2 }  ×====
     """
     
-    def addMessageHandler(self , callback=None , commands= None , types= None , regexp= [], text= None ):
+    def addMessageHandler(self , callback=None , commands= None , types= None , regexp= None , text= None ):
         if callback is None:
             return logging.warning("pyTelegramClient : callback function not found !. ") 
         _dict = {"callback": callback , "commands":[] , "types":[] , "regexp": None , "text":[] }
@@ -112,8 +176,24 @@ class TelegramClient:
                 return logging.warning("pyTelegramClient : 'text' list must an array . ") 
             _dict["text"] = text
         self.inline_handlers.append(_dict)
-        logging.warning("pyTelegramClient : registered new message handler . ")
-        return True            
+        return True
+    
+    def addEditMessageHandler(self , callback=None , types= None , regexp= None, text= None ):
+        if callback is None:
+            return logging.warning("pyTelegramClient : callback function not found !. ") 
+        _dict = {"callback": callback , "commands":[] , "types":[] , "regexp": None , "text":[] }
+        if types:
+            if isinstance( types  , list) == False:
+                return logging.warning("pyTelegramClient : 'types' list must an array . ") 
+            _dict["types"] = types
+        if regexp:
+            _dict["regexp"] = regexp 
+        if text:
+            if isinstance( text , list) == False:
+                return logging.warning("pyTelegramClient : 'text' list must an array . ") 
+            _dict["text"] = text
+        self.edited_message_handlers.append(_dict)
+        return True
     
     def addInlineHandler(self , callback=None , regexp=None , query=None ):
         if callback is None:
@@ -126,12 +206,38 @@ class TelegramClient:
                 return logging.warning("pyTelegramClient : 'query' list must an array . ") 
             _dict["query"] = query
         self.inline_handlers.append(_dict)
-        logging.warning("pyTelegramClient : registered new message handler . ")
+        return True
+    
+    def addChannelPostHandler(self , callback=None ):
+        if callback is None:
+            return logging.warning("pyTelegramClient : callback function not found !. ") 
+        _dict = {"callback": callback }        
+        self.channel_post_handlers.append(_dict)
+        return True
+    
+    def addEditChannelPostHandler(self , callback=None ):
+        if callback is None:
+            return logging.warning("pyTelegramClient : callback function not found !. ") 
+        _dict = {"callback": callback }        
+        self.edited_channel_post_handlers.append(_dict)
+        return True
+    
+    def addCallbackQueryHandler(self , callback=None , regexp=None , data=None ):
+        if callback is None:
+            return logging.warning("pyTelegramClient : callback function not found !. ") 
+        _dict = {"callback": callback , "regexp": None , "data":[] }
+        if regexp:
+            _dict["regexp"] = regexp
+        if data:
+            if isinstance( data , list) == False:
+                return logging.warning("pyTelegramClient : 'data' list must an array . ") 
+            _dict["data"] = data
+        self.callback_query_handlers.append(_dict)
         return True    
     
     """
     ====×  MESSAGE PROCESSOR & NOTIFIER  ×====
-    """
+    """ 
     
     def processUpdate(self , req ):
         if "message" in req :
@@ -140,11 +246,27 @@ class TelegramClient:
         if "inline_query" in req:
             update = self.parseInlineQuery( req["inline_query"] )
             return self._notify_inline(update)
+        if "callback_query" in req:
+            update = self.parseCallbackData( req["callback_query"] )
+            return self._notify_callback(update)
+        if "edited_message" in req:
+            update = self.parseMessage( req["edited_message"] )
+            return self._notify_edit_message(update)
+        if "channel_post" in req:
+            update = self.parseMessage( req["channel_post"] )
+            return self._notify_channel_post(update)
+        if "edited_channel_post" in req:
+            update = self.parseMessage( req["edited_channel_post"] )
+            return self._notify_edit_channel_post(update)
+        if "chosen_inline_result" in req:
+            update = self.parseChoosenInlineResult( req[ "chosen_inline_result" ] )
+            return
+            
     
     def _notify_inline(self , update):
-        q = update.get("query", "None")
+        q = update.get("query", None)
         for x in self.inline_handlers:
-            if x["regexp"] is not None:
+            if x["regexp"] is not None and q is not None:
                 r = re.search( x["regexp"] , str(q))
                 if r :
                     return x["callback"]( update )
@@ -152,22 +274,70 @@ class TelegramClient:
                 if q in x["query"]:
                     return x["callback"]( update ) 
     
+    def _notify_channel_post(self , update):
+        event = messageEvent( self , update ) # TODO : add channel post event .
+        for x in self.channel_post_handlers:
+            return x["callback"]( event )
+        
+    def _notify_edit_channel_post(self , update):
+        event = messageEvent( self , update ) # TODO : add edit channel post event .
+        for x in self.edited_channel_post_handlers:
+            return x["callback"]( event )
+    
+    def _notify_edit_message(self , update):
+        text = update.get("text")
+        event = messageEvent( self , update )
+        for x in self.edited_message_handlers:            
+            if len(x["text"]) > 0:
+                if text in x["text"]:
+                    return x["callback"]( event )
+            if x["regexp"] is not None and text is not None:
+                r = re.search( x["regexp"] , str(text))
+                if r :
+                    return x["callback"]( event )
+            type = self.getType( update )                
+            if type in x["types"]:
+                return x["callback"]( event )           
+    
+    def _notify_callback(self , update):
+        data = update.get("data", None)
+        event = callbackQueryEvent(self , update)
+        for x in self.callback_query_handlers:
+            if x["regexp"] is not None and data is not None:
+                r = re.search( x["regexp"] , str( data ))
+                if r :
+                    return x["callback"]( event )
+            if len(x["data"]) > 0:
+                if q in x["data"]:
+                    return x["callback"]( event ) 
+    
     def _notify_message(self , update):
-        text = update.get("text", "None")
+        text = update.get("text", None)
+        event = messageEvent( self , update )
         for x in self.message_handlers:
             if len(x["text"]) > 0:
                 if text in x["text"]:
-                    return x["callback"]( update ) 
-            if x["regexp"] is not None:
+                    return x["callback"]( event ) 
+            if x["regexp"] is not None and text is not None:
                 r = re.search( x["regexp"] , str(text))
                 if r :
-                    return x["callback"]( update )
+                    return x["callback"]( event )
             if len(x["commands"]) > 0:
                 cmd = self.extractCommand(text)
                 if cmd in x["commands"]:
-                    return x["callback"]( update )
-            if "text" in x["types"]:
-                return x["callback"]( update )
+                    return x["callback"]( event )
+            type = self.getType(update )                                
+            if type in x["types"]:
+                return x["callback"]( event )        
+    
+    def addMessageListner(self , chat , func):
+        self.answers[chat] = func
+        return True
+    
+    def removeMessageListner(self , chat ):
+        if chat in self.answers:
+            del self.answers[chat]
+        return True
     
     """
     ====×  UTILS  ×====
@@ -184,8 +354,45 @@ class TelegramClient:
         return text.split()[0].split('@')[0][1:] if self.is_command(text) else None
     
     def callApi(self , method ,  params={} ,  files=None):
-        data = requests.post ( f"https://api.telegram.org/bot{self.token}/{method}" , data = params , files = files  )
+        data = self.new_session().post ( f"https://api.telegram.org/bot{self.token}/{method}" , data = params , files = files  )
         return data.json()
+    
+    def getType(self , obj):
+        if obj.get("photo") is not None:
+            return "photo"
+        if obj.get("text") is not None:
+            return "text"
+        if obj.get("audio") is not None:
+            return "audio"
+        if obj.get("document") is not None:
+            return "document"
+        if obj.get("animation") is not None:
+            return "animation"
+        if obj.get( "game" ) is not None:
+            return "game"
+        if obj.get("sticker") is not None:
+            return "sticker"
+        if obj.get("poll") is not None:
+            return "poll"
+        if obj.get( "video" ) is not None:
+            return "video"
+        if obj.get( "voice" ) is not None:
+            return "voice"
+        if obj.get( "video_note" ) is not None:
+            return "video_note"
+        if obj.get( "contact" ) is not None:
+            return "contact"
+        if obj.get( "dice" ) is not None:
+            return "dice"        
+        if obj.get("location") is not None:
+            return "location"
+        if obj.get("venue") is not None:
+            return "venue"
+        if obj.get( "invoice" ) is not None:
+            return "invoice"
+        if obj.get( "via_bot" ) is not None:
+            return "via_bot"
+        
     
     """
     ====×  REQUEST PARSERS  ×====
@@ -383,8 +590,27 @@ class TelegramClient:
         if "game_short_name" in obj:
             opts["game_short_name"] = obj["game_short_name"]
         return opts
-                
-        
-        
     
-    
+    def parseChoosenInlineResult(self , obj):
+        opts = {
+            "result_id":None , "user":{} , "location":None , "inline_message_id":None , "query":None
+        }
+        if "result_id" in obj:
+            opts["result_id"] = obj["result_id"]
+        if "from" in obj:
+            opts["user"] = self.parseUserDict( obj["from"] )
+        if "location" in obj:
+            opts["location"] = obj["location"]
+        if "inline_message_id" in obj:
+            opts["inline_message_id"] = obj["inline_message_id"]
+        if "query" in obj:
+            opts["query"] = obj["query"]
+        return opts
+            
+            
+            
+            
+            
+            
+            
+            
