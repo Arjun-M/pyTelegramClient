@@ -32,7 +32,7 @@ class Client:
         return thread_local.session
     
     def _polling(self , offset , allowed_updates):
-        req = self.callApi("getUpdates" , {"offset":offset , "allowed_updates": allowed_updates , "limit":100} )
+        req = self.callApiNoLogs("getUpdates" , {"offset":offset , "allowed_updates": allowed_updates , "limit":100} )
         if req["ok"] == False:
             self.polling = False            
             logging.warning("pyTelegramClient : failed to 'getUpdates' seems this is not a valid token .")
@@ -302,9 +302,15 @@ class Client:
             data = self.new_session().post ( f"https://api.telegram.org/bot{self.token}/{method}" , data = params , files = files  ).json()
             if data["ok"] == False:
                 self._notify_api_error( method=method , files=files , payload=params , data=data )
+            if "result" in data:
+                return data["result"]
             return data
         except Exception as e:
             self._notify_api_error( method=method , files=files , payload=params , data= str(e) )            
+    
+    def callApiNoLogs(self , method ,  params={} ,  files=None):
+        data = self.new_session().post ( f"https://api.telegram.org/bot{self.token}/{method}" , data = params , files = files  ).json()
+        return data
     
     def getType(self , obj):
         if obj.get("photo") is not None:
