@@ -3,7 +3,7 @@ import json , requests , asyncio , logging
 
 logging.basicConfig(format='%(asctime)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S')  
 
-class createConnection:
+class Telegram:
     def __init__(self, client ):
         self.client = client
             
@@ -332,18 +332,5 @@ class createConnection:
             payload['switch_pm_parameter'] = switch_pm_parameter
         return self.client.callApi ("answerInlineQuery", payload )
         
-    
-    
-   
-
-        
-        
-        
-        
-        
-        
-
-    
-    
     
     
