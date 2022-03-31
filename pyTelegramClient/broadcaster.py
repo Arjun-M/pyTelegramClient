@@ -43,7 +43,7 @@ class Broadcaster:
         success = [] # { chat_id: <int> , result: <dict> }                
         for x in list:
             payload["chat_id"] = x
-            resp = self.client.callApi ( method , payload )
+            resp = self.client. callApiNoLogs( method , payload )
             if resp["ok"] == False:
                 _dict = { "chat_id": x , "error": "Telegram API returned error "+json.dumps(resp) }
                 error.append( _dict )
