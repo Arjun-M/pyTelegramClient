@@ -1,7 +1,7 @@
-import json , logging , re , requests, datetime
+import json , logging , re , requests, calendar , time , datetime
 from requests.sessions import Session
-from .event import messageEvent , callbackQueryEvent
-from threading import Thread,local
+from .event import messageEvent , callbackQueryEvent , inlineQueryEvent
+from threading import Thread , local
 
 thread_local = local()
 logging.basicConfig(format='%(asctime)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S')  
@@ -9,7 +9,7 @@ logging.basicConfig(format='%(asctime)s - %(message)s', datefmt='%d-%b-%y %H:%M:
 class Client:
     def __init__(self, token ):
         self.token = token
-        self.answers = {}
+        self.answers = {}                        # { [chat_id]: <func> }
         self.message_handlers = []               # { callback: <func> , regexp:None , text:[] , commands:[] , type:[ "text" ] }
         self.edited_message_handlers = []        # { callback: <func> , regexp:None , text:[] , type:[ "text" ] }
         self.channel_post_handlers = []          # { callback: <func> } TODO : "type"
@@ -18,20 +18,20 @@ class Client:
         self.chosen_inline_handlers = []         # { callback: <func> }
         self.callback_query_handlers = []        # { callback: <func> , regexp:None , data:[] }
         self.shipping_query_handlers = []        # Not interested 🤪 : TODO
-        self.pre_checkout_query_handlers = []    #  ""       ""
+        self.pre_checkout_query_handlers = []    # Not interested 🤪 : TODO
         self.poll_handlers = []                  # {}
-        self.poll_answer_handlers = []
-        self.my_chat_member_handlers = []
-        self.chat_member_handlers = []
-        self.chat_join_request_handlers = []  
+        self.poll_answer_handlers = []           # {}
+        self.my_chat_member_handlers = []        # {}
+        self.chat_member_handlers = []           # {}
+        self.chat_join_request_handlers = []     # {}
         self.httpError = None                    # Telegram API error catching .
         
-    def new_session(self):
+    def new_req_thread(self):
         if not hasattr(thread_local,'session'):
             thread_local.session = requests.Session()
         return thread_local.session
     
-    def _polling(self , offset , allowed_updates):
+    def _polling(self , offset , allowed_updates ):
         req = self.callApiNoLogs("getUpdates" , {"offset":offset , "allowed_updates": allowed_updates , "limit":100} )
         if req["ok"] == False:
             self.polling = False            
@@ -40,23 +40,30 @@ class Client:
         else:
             return req
         
-    def polling(self , allowed_updates=None):
+    def stop(self):
+        self.polling = False
+    
+    def polling(self , log_updates=False , drop_pending_updates=False , allowed_updates=None):
         self.polling = True
         offset = 0
-        logging.warning("worker : pyTelegramClient has started polling .")
-        self.callApi("deleteWebhook", {}) # delete webhook before start polling .
+        logging.warning("pyTelegramClient : started long polling .")
+        self.callApiNoLogs("deleteWebhook", { "drop_pending_updates":drop_pending_updates }) # delete webhook before start polling .
         while self.polling :
-            updates = self._polling(offset+1 , allowed_updates)
+            updates = self._polling(offset+1 , allowed_updates )
             if updates is False:
                 break;
             if updates is not None:
                 for x in updates["result"]:
                     offset = x["update_id"] 
-                    self.processUpdate (x)
+                    self.processUpdate (x)                    
+                    if log_updates is True:
+                        logging.warning ( str(x) )
     
-    """
-    ====×  REQUEST HANDLER / ROUTER ×====
-    """
+    def start(self , log_updates=False , drop_pending_updates=False , allowed_updates=None):
+        return self.polling( log_updates , drop_pending_updates , allowed_updates )
+    
+    def launch(self , log_updates=False , drop_pending_updates=False , allowed_updates=None):
+        return self.polling( log_updates , drop_pending_updates , allowed_updates )
     
     def messageHandler(self , *args, **kwargs):
         def inner(func):
@@ -140,14 +147,10 @@ class Client:
             self.edited_message_handlers.append(_dict)
         return inner
     
-    def telegramAPIerror(self , *args, **kwargs):
+    def onClientError(self , *args, **kwargs):
         def inner(func):
             self.httpError = func
         return inner
-    
-    """
-    ====×  MESSAGE PROCESSOR & NOTIFIER  ×====
-    """ 
     
     def processUpdate(self , req ):
         if "message" in req :
@@ -178,56 +181,58 @@ class Client:
             update = self.parsePollAnswer( req["poll_answer"] )
             return self._notify_poll_answers(update)
     
+    # Re write !!!!!!!
     def _notify_inline(self , update):
         q = update.get("query", None)
+        event = inlineQueryEvent(update)
         for x in self.inline_handlers:
             if x["regexp"] is not None and q is not None:
                 r = re.search( x["regexp"] , str(q))
                 if r :
-                    return x["callback"]( update )
+                    return _emit_callback(x["callback"] , event )   
             if len(x["query"]) > 0:
                 if q in x["query"]:
-                    return x["callback"]( update ) 
+                    return _emit_callback(x["callback"] , event ) 
     
     def _notify_channel_post(self , update):
         event = messageEvent( self , update ) # TODO : add channel post event .
         for x in self.channel_post_handlers:
-            return x["callback"]( event )
+            return _emit_callback(x["callback"] , event )   
     
     def _notify_poll(self , update):
-        event = messageEvent( self , update ) # TODO : add channel post event .
+        event = messageEvent( self , update ) # TODO : add poll event .
         """for x in self.channel_post_handlers:
             return x["callback"]( event )"""
     
     def _notify_poll_answers(self , update):
-        event = messageEvent( self , update ) # TODO : add channel post event .
+        event = messageEvent( self , update ) # TODO : add poll answer event .
         """for x in self.channel_post_handlers:
             return x["callback"]( event )"""
     
     def _notify_chosen_inline(self , update):
         event = messageEvent( self , update ) # TODO : add choosen inline post event .
         for x in self.chosen_inline_handlers:
-            return x["callback"]( event )
+            return _emit_callback(x["callback"] , event )   
         
     def _notify_edit_channel_post(self , update):
         event = messageEvent( self , update ) # TODO : add edit channel post event .
         for x in self.edited_channel_post_handlers:
-            return x["callback"]( event )
+            return _emit_callback(x["callback"] , event )
     
     def _notify_edit_message(self , update):
         text = update.get("text")
         event = messageEvent( self , update )
-        for x in self.edited_message_handlers:            
+        for x in self.edited_message_handlers:
             if len(x["text"]) > 0:
                 if text in x["text"]:
-                    return x["callback"]( event )
+                    return _emit_callback(x["callback"] , event )
             if x["regexp"] is not None and text is not None:
                 r = re.search( x["regexp"] , str(text))
                 if r :
-                    return x["callback"]( event )
+                    return _emit_callback(x["callback"] , event )   
             type = self.getType( update )                
             if type in x["types"]:
-                return x["callback"]( event )           
+                return _emit_callback(x["callback"] , event )         
     
     def _notify_callback(self , update):
         data = update.get("data", None)
@@ -236,43 +241,44 @@ class Client:
             if x["regexp"] is not None and data is not None:
                 r = re.search( x["regexp"] , str( data ))
                 if r :
-                    return x["callback"]( event )
+                    return _emit_callback(x["callback"] , event )
             if len(x["data"]) > 0:
                 if q in x["data"]:
-                    return x["callback"]( event ) 
+                    return _emit_callback(x["callback"] , event ) 
     
     def _notify_message(self , update):
         text = update.get("text", None)
         event = messageEvent( self , update )
+        chat = update.get("chat").get("id")
         for x in self.message_handlers:
+            if chat in self.answers:
+                return _emit_callback( self.answers[chat] , event)
             if len(x["text"]) > 0:
                 if text in x["text"]:
-                    return x["callback"]( event ) 
+                    return _emit_callback(x["callback"] , event ) 
             if x["regexp"] is not None and text is not None:
                 r = re.search( x["regexp"] , str(text))
                 if r :
-                    return x["callback"]( event )
+                    return _emit_callback(x["callback"] , event ) 
             if len(x["commands"]) > 0:
                 cmd = self.extractCommand(text)
                 if cmd in x["commands"]:
-                    return x["callback"]( event )
+                    return _emit_callback(x["callback"] , event )
             type = self.getType(update )                                
             if type in x["types"]:
-                return x["callback"]( event )      
+                return _emit_callback(x["callback"] , event )      
             
     def _notify_api_error(self , files=None , payload=None , method=None , data=None ):
-        _dict = {
-            "method": method,
-            "payload": payload,
-            "has_file": False ,
-            "error": data ,
-            "string": "Telegram API returned "+json.dumps(data),
-            "time-stamp": datetime.datetime.now()
-        }
+        GMT = time.gmtime()
+       _dict = { "method": method, "payload": payload, "has_file": False , "error": data , "string": "Telegram API returned "+str(data), "time": calendar.timegm(GMT) }
         if files is not None:
             _dict["has_file"] = True
         if self.httpError is not None:
-            self.httpError(_dict)                
+            return self.httpError(_dict)
+        raise Exception ( "Telegram API returned "+str(_dict)+" ." )        
+        
+    def _emit_callback(self , callback , event):
+        return callback( event )
     
     def addMessageListner(self , chat , func):
         self.answers[chat] = func
@@ -281,11 +287,7 @@ class Client:
     def removeMessageListner(self , chat ):
         if chat in self.answers:
             del self.answers[chat]
-        return True
-    
-    """
-    ====×  UTILS  ×====
-    """
+        return True  
     
     def is_command(self , text):
         if text is None: 
@@ -298,19 +300,27 @@ class Client:
         return text.split()[0].split('@')[0][1:] if self.is_command(text) else None
     
     def callApi(self , method ,  params={} ,  files=None):
-        try:
-            data = self.new_session().post ( f"https://api.telegram.org/bot{self.token}/{method}" , data = params , files = files  ).json()
-            if data["ok"] == False:
-                self._notify_api_error( method=method , files=files , payload=params , data=data )
-            if "result" in data:
-                return data["result"]
-            return data
-        except Exception as e:
-            self._notify_api_error( method=method , files=files , payload=params , data= str(e) )            
-    
+        data = self.new_req_thread().post ( f"https://api.telegram.org/bot{self.token}/{method}" , data = params , files = files  )
+        result = self._result(data ,method , files , params )
+        return result
+        
     def callApiNoLogs(self , method ,  params={} ,  files=None):
-        data = self.new_session().post ( f"https://api.telegram.org/bot{self.token}/{method}" , data = params , files = files  ).json()
+        data = self.new_req_thread().post ( f"https://api.telegram.org/bot{self.token}/{method}" , data = params , files = files  ).json()
         return data
+    
+    def _result(self, data , method , files , params ):
+        try:
+            result = data.json()
+        except:
+            if data.status_code != 200:
+                self._notify_api_error( method=method , files=files , payload=params , data= "Server returned an invalid HTTP status code , {}".format(data.status_code) )                 
+            else:
+                self._notify_api_error( method=method , files=files , payload=params , data= "Server returned an invalid JSON response , ") 
+        else:
+            if result['ok'] == False:
+                self._notify_api_error( method=method , files=files , payload=params , data= result )           
+            return result
+
     
     def getType(self , obj):
         if obj.get("photo") is not None:
@@ -349,9 +359,9 @@ class Client:
             return "via_bot"
         
     
-    """
-    ====×  REQUEST PARSERS  ×====
-    """
+    
+    
+    
     
     def parseUserDict(self , obj):
         _dict = {
@@ -566,7 +576,33 @@ class Client:
         opts = {
             "id": None , "question": None ,"options":None , "total_voter_count":None , "is_closed":None , "is_anonymous":None , "type":None ,"allows_multiple_answers":None , "correct_option_id":None , "explanation":None , "explanation_entities":None , "open_period":None , "close_date":None
         }
-        pass
+        if "id" in obj:
+            opts["id"] = obj["id"]
+        if "question" in obj:
+            opts["question"] = obj["question"]
+        if "options" in obj:
+            opts["options"] = obj["options"]
+        if "total_voter_count" in obj:
+            opts["total_voter_count"] = obj["total_voter_count"]
+        if "is_closed" in obj:
+            opts["is_closed"] = obj["is_closed"]
+        if "is_anonymous" in obj:
+            opts["is_anonymous"] = obj["is_anonymous"]
+        if "type" in obj:
+            opts["type"] = obj["type"]
+        if "allows_multiple_answers" in obj:
+            opts["allows_multiple_answers"] = obj["allows_multiple_answers"]
+        if "correct_option_id" in obj:
+            opts["correct_option_id"] = obj["correct_option_id"]
+        if "explanation" in obj:
+            opts["explanation"] = obj["explanation"]
+        if "explanation_entities" in obj:
+            opts["explanation_entities"] = obj["explanation_entities"]
+        if "open_period" in obj:
+            opts["open_period"] = obj["open_period"]
+        if "close_date" in obj:
+            opts["close_date"] = obj["close_date"]
+        return opts
     
     def parsePollAnswer(self , obj):
         opts ={
@@ -580,35 +616,4 @@ class Client:
             opts["user"] = self.parseUserDict( obj["user"] ) 
         return opts
             
-            
-            
-class Button:
-    def url(name , url):
-        return { "text": str(name) , "url": str(url) }
-    
-    def inline(name , data):
-        return { "text": str(name) , "callback_data": str(data) }
-    
-    def switch_inline(name , text):
-        return { "text": str(name) , "switch_inline_query": str(text) }    
-    
-    def switch_inline_current(name , data):
-        return { "text": str(name) , "switch_inline_query_current_chat": str(data) }
-    
-    def text(name):
-        return str(name)
-    
-    def inline(name , data):
-        return { "text": str(name) , "callback_data": str(data) }
-    
-    def keyboard(_dict , resize_keyboard=False , one_time_keyboard=False , input_field_placeholder=None):
-        return {
-            "keyboard": _dict ,
-            "resize_keyboard": resize_keyboard ,
-            "one_time_keyboard":one_time_keyboard ,
-            "input_field_placeholder":input_field_placeholder
-        }
-    
-    def inline_keyboard(_dict):
-        return {"inline_keyboard": json.dumps(_dict) }            
             
