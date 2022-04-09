@@ -6,6 +6,9 @@ from threading import Thread , local
 thread_local = local()
 logging.basicConfig(format='%(asctime)s - %(message)s', datefmt='%d-%b-%y %H:%M:%S')  
 
+def _emit_callback(callback , event):
+    return callback( event )
+
 class Client:
     def __init__(self, token ):
         self.token = token
@@ -276,9 +279,6 @@ class Client:
         if self.httpError is not None:
             return self.httpError(_dict)
         raise Exception ( "Telegram API returned "+str(_dict)+" ." )        
-        
-    def _emit_callback(self , callback , event):
-        return callback( event )
     
     def addMessageListner(self , chat , func):
         self.answers[chat] = func
