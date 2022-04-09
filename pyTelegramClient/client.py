@@ -270,7 +270,7 @@ class Client:
             
     def _notify_api_error(self , files=None , payload=None , method=None , data=None ):
         GMT = time.gmtime()
-       _dict = { "method": method, "payload": payload, "has_file": False , "error": data , "string": "Telegram API returned "+str(data), "time": calendar.timegm(GMT) }
+        _dict = { "method": method, "payload": payload, "has_file": False , "error": data , "string": "Telegram API returned error : "+str(data), "time": calendar.timegm(GMT) }
         if files is not None:
             _dict["has_file"] = True
         if self.httpError is not None:
