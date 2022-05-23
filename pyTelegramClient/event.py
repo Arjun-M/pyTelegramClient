@@ -1,32 +1,90 @@
-import json
+from .telegram import Telegram
+from .types import User , Chat , Message , Video , Document , Audio , Animation , PhotoSize , MessageEntity , PhotoSize , Animation , Audio , Document , Sticker , MaskPosition , Video , VideoNote , Voice , Contact , Dice , Game , PollOption , PollAnswer , Poll , Location, Venue,  WebAppData , ProximityAlertTriggered , MessageAutoDeleteTimerChanged , VideoChatScheduled , VideoChatEnded , VideoChatParticipantsInvited  , UserProfilePhotos , WebAppInfo , LoginUrl , InlineKeyboardMarkup , InlineKeyboardButton , Message    
 
 class messageEvent:
-    def __init__(self , Bot , request):
-        self.client = Bot
-        self.request = request  # Extension for getting updates
-        self.json = request     # Extension for getting updates
-        self.update = request   # Extension for getting updates
+    def __init__(self , client , update):
+        self._client = client
+        self.telegram = Telegram( client = client )
+        self.update = update
+        self.id = update["message_id"]
+        self.message_id = update["message_id"]
+        self.user = User( update.get("from") ).tuple()
+        self.chat = Chat( update.get("chat") ).tuple()
+        self.sender_chat = Chat( update.get("sender_chat") ).tuple()
+        self.forward_from = User( update.get("forward_from") ).tuple()
+        self.forward_from_chat = Chat( update.get("forward_from_chat") ).tuple()
+        self.forward_from_message_id = update.get("forward_from_message_id")
+        self.forward_signature = update.get("forward_signature")
+        self.forward_sender_name = update.get("forward_sender_name")
+        self.forward_date = update.get("forward_date")
+        self.is_automatic_forward = update.get("is_automatic_forward")
+        self.reply_to_message = None
+        self.via_bot = User( update.get("via_bot") ).tuple()
+        self.edit_date = update.get("edit_date")
+        self.has_protected_content = update.get("has_protected_content")
+        self.media_group_id = update.get("media_group_id")
+        self.author_signature = update.get("author_signature")
+        self.text = update.get("text")
+        self.entities = []
+        self.animation = Animation( update.get("animation") ) .tuple()
+        self.audio = Audio( update.get("audio") ) .tuple()
+        self.document = Document( update.get("document") ) .tuple()
+        self.photo = [] 
+        self.sticker = Sticker( update.get("sticker") ).tuple() 
+        self.video = Video( update.get("video") ) .tuple()
+        self.video_note = VideoNote( update.get("video_note") ).tuple()
+        self.voice = Voice( update.get("voice") ).tuple()
+        self.contact = Contact( update.get("contact") ).tuple()
+        self.dice = Dice( update.get("dice") ).tuple()
+        self.game = Game( update.get("game") ).tuple()
+        self.poll = Poll( update.get("poll") ).tuple()
+        self.venue = Venue( update.get("venue") ).tuple()
+        self.location = Location( update.get("location") ).tuple()
+        self.caption = update.get("caption")
+        self.caption_entities = []
+        self.left_chat_member = User( update.get("left_chat_member") ).tuple()
+        self.new_chat_members = []
+        self.new_chat_title = update.get("new_chat_title")
+        self.new_chat_photo = []
+        self.delete_chat_photo = update.get("delete_chat_photo ")
+        self.group_chat_created = update.get("group_chat_created")
+        self.supergroup_chat_created = update.get("supergroup_chat_created")
+        self.channel_chat_created = update.get("channel_chat_created")
+        self.message_auto_delete_timer_changed = MessageAutoDeleteTimerChanged( update.get("message_auto_delete_timer_changed") ).tuple()
+        self.migrate_to_chat_id = update.get("migrate_to_chat_id")
+        self.migrate_from_chat_id = update.get("migrate_from_chat_id")
+        self.pinned_message = None
+        self.invoice = update.get("invoice") # TODO 🐈
+        self.successful_payment = update.get("successful_payment") # TODO 🐈
+        self.connected_website = update.get("connected_website")
+        self.passport_data = update.get("passport_data") # TODO 🐈
+        self.proximity_alert_triggered = ProximityAlertTriggered( update.get("proximity_alert_triggered") ).tuple()
+        self.video_chat_scheduled = VideoChatScheduled( update.get("video_chat_scheduled") ).tuple()
+        self.video_chat_started = update.get("video_chat_started") 
+        self.video_chat_ended = VideoChatEnded( update.get("video_chat_ended") ).tuple()
+        self.video_chat_participants_invited = VideoChatParticipantsInvited( update.get("video_chat_participants_invited") ).tuple()   
+        self.web_app_data = WebAppData( update.get("web_app_data") ).tuple()
+        self.reply_markup = InlineKeyboardMarkup( update.get("reply_markup") ).tuple()
         
-    def json(self):
-        return self.request
-    
-    """
-    ➢ Mirror Extension of "sendChatAction()"
-    """
-    def typing(self ):
-        chat = self.user().get("id")
-        payload = {'chat_id': chat , 'action': "typing"}
-        return self.client.callApi( "sendChatAction" , payload )    
-    
-    """
-    ➢ Mirror Extension of "sendMessage()"
-    """
+        if "photo" in update:
+            for _x in update["photo"]: self.photo.append( PhotoSize(_x).tuple() )
+        if "entities" in update:
+            for _x in update["entities"]:  self.entities.append( MessageEntity( _x ).tuple() )
+        if "caption_entities" in update:
+            for _x in update["caption_entities"]:  self.caption_entities.append( MessageEntity( _x ).tuple() )
+        if "delete_chat_photo" in update:  self.delete_chat_photo = update["delete_chat_photo"]
+        if "new_chat_photo" in update:  self.new_chat_photo = update["new_chat_photo"]
+        if "new_chat_members" in update:  self.new_chat_members = update["new_chat_members"]
+        if "pinned_message" in update:  self.pinned_message = Message( update["pinned_message"] ).tuple()
+        if "reply_to_message" in update:   self.reply_to_message = Message( update["reply_to_message"] ).tuple()
+
     def respond(self , text , reply=False , disable_web_page_preview=None , reply_markup=None , disable_notification=None, entities=None , parse_mode=None , protect_content=None):
-        chat = self.request.get("chat").get("id")
-        payload = {'chat_id': str(chat), 'text': text , 'allow_sending_without_reply':True}
-        request = self.request
+        """
+        : Mirror Extension of "client.telegram.sendMessage()"
+        """
+        payload = {'chat_id': self.chat.id , 'text': text , 'allow_sending_without_reply':True}
         if reply == True :
-            payload['reply_to_message_id'] = self.request.get("reply_to_message_id")
+            payload['reply_to_message_id'] = self.message_id
         if disable_web_page_preview is not None:
             payload['disable_web_page_preview'] = disable_web_page_preview
         if reply_markup:
@@ -39,103 +97,19 @@ class messageEvent:
             payload['entities'] = entities 
         if protect_content is not None:
             payload['protect_content'] = protect_content
-        return self.client.callApi("sendMessage" , payload )
-    
-    """
-    ➢ Mirror Extension of "deleteMessage()"
-    """
+        return self._client.callApi("sendMessage" , payload )
+        
+    def typing(self ):
+        """
+        : Mirror Extension of "client.telegram.sendChatAction()"
+        """
+        payload = {'chat_id': self.chat.id , 'action': "typing"}
+        return self._client.callApi( "sendChatAction" , payload )
+        
     def delete(self):
-        payload = { "chat_id": self.request.get("chat").get("id"), "message_id": self.request.get("message_id")    }
-        return self.client.callApi("deleteMessage" , payload )
-    
-    """
-    ➢ Mirror Extension of "sendMessage()"
-    """
-    def sendKeyboard(self , btn , message):
-        buttons = { "keyboard": btn , "resize_keyboard":True }
-        if isinstance(btn  , str):
-            buttons = btn
-        payload = { "text": message , "chat_id": self.request.get("chat").get("id"), "reply_markup": btn }
-        return self.client.callApi("sendMessage" , payload )
-    
-    def sendInlineKeyboard(self , btn , message):
-        buttons = { "inline_keyboard": btn }
-        if isinstance(btn  , str):
-            buttons = btn
-        payload = { "text": message , "chat_id": self.request.get("chat").get("id"), "reply_markup": btn }
-        return self.client.callApi("sendMessage" , payload )
-    
-class callbackQueryEvent:
-    def __init__(self , Bot , request):
-        self.client = Bot
-        self.request = request  # Extension for getting updates
-        self.json = request     # Extension for getting updates
-        self.update = request   # Extension for getting updates
-        
-    def json(self):
-        return self.request    
-        
-    """
-    ➢ Mirror Extension of "deleteMessage()"
-    """
-    def delete(self):
-        request = self.json()
-        payload = { "chat_id": request.get("message").get("chat").get("id"), "message_id": request["message"].get("message_id")  }
-        return self.client.callApi("deleteMessage" , payload )
-    
-    """
-    ➢ Mirror Extension of "answerCallbackQuery()"
-    """
-    def answer(self , text , alert=False):
-        payload = { "callback_query_id": self.json().get("id") }
-        if alert :
-            payload['show_alert'] = alert
-        return self.client.callApi("answerCallbackQuery" , payload )
-    
-    """
-    ➢ Mirror Extension of "editMessageText()"
-    """
-    def edit(self, text): # edit both reply mark and text
-        request = self.json()
-        payload = {"text":text}
-        if request.get("inline_message_id") is not None:
-            payload["inline_message_id"] = request.get("inline_message_id")
-        else:
-            payload["message_id"] = request.get("message").get("message_id")
-        return 
-    
-    def editInlineKeyboard(self , buttons): # edit just reply mark and leave text as it is
-        pass
-    
-
-class inlineQueryEvent:
-    def __init__(self , Bot , request):
-        self.client = Bot
-        self.request = request  # Extension for getting updates
-        self.json = request     # Extension for getting updates
-        self.update = request   # Extension for getting updates
-        
-    def json(self):
-        return self.request    
-    
-    """
-    ➢ Mirror Extension of "answerInlineQuery()"
-    """
-    def answer(self , results, cache_time=None, is_personal=None, next_offset=None, switch_pm_text=None, switch_pm_parameter=None):
-        inline_query_id = self.request.get("inline_query_id")
-        payload = {'inline_query_id': inline_query_id, 'results': results }
-        if cache_time is not None:
-            payload['cache_time'] = cache_time
-        if is_personal is not None:
-            payload['is_personal'] = is_personal
-        if next_offset is not None:
-            payload['next_offset'] = next_offset
-        if switch_pm_text:
-            payload['switch_pm_text'] = switch_pm_text
-        if switch_pm_parameter:
-            payload['switch_pm_parameter'] = switch_pm_parameter
-        return self.client.callApi ("answerInlineQuery", payload )
-    
-    
-    
+        """
+        : Mirror Extension of "client.telegram.deleteMessage()"
+        """
+        payload = { "chat_id": self.chat.id , "message_id": self.message_id }
+        return self._client.callApi("deleteMessage" , payload )
     
