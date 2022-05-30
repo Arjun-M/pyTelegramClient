@@ -12,7 +12,7 @@ allClientProcess = [ " " ]
 class Client:
     def __init__(self, token ):
         self.token = token
-        self.answers = {}                        # { [chat_id]: <func> }
+        self.answers = { }                       # { [chat_id]: <func> }
         self.telegram = Telegram( client=self )  # << class representing telegram api methods . >>
         self.message_handlers = []               # { callback: <func> , regexp:None , text:[] , commands:[] , type:[ "text" ] }
         self.edited_message_handlers = []        # { callback: <func> , regexp:None , text:[] , type:[ "text" ] }
@@ -21,8 +21,8 @@ class Client:
         self.my_chat_member_handlers = []        # {  }
         self.chat_member_handlers = []           # {  }
         self.chat_join_request_handlers = []     # {  }
-        self.process_handlers = {  }
-        self.master_function =[]
+        self.process_handlers = { }
+        self.master_function = []
     
     def reject( self ):
         return "$reject"
@@ -61,6 +61,10 @@ class Client:
         except : 
             return None
     
+    def register_conversation(self , chat , func):
+        self.answers[chat] = func
+        return 
+    
     def _process_polling(self , offset , allowed_updates ):
         req = self._post("getUpdates" , {"offset":offset , "allowed_updates": allowed_updates , "limit":100} )
         if req["ok"] == False:
@@ -90,8 +94,8 @@ class Client:
         cmd = getCommand( event.text )
         update_type = getType( event.update )
         for _handler in self.message_handlers:
-            if event.chat.id in self.answers :
-                return self.answers[event.chat.id]( event )
+            if event.chat.id in self.answers:
+                return self.answers[ event.chat.id ]( event )
             if event.text in _handler["text"] :
                 return _handler["callback"]( event )
             if _handler["regexp"] is not None and event.text is not None:
